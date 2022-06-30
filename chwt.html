@@ -1,0 +1,566 @@
+<html>
+	<head>
+		<title> ClickHouse Wizard Tower</title>
+		<script src="https://cdn.jsdelivr.net/npm/vega@5.21.0"></script>
+    		<script src="https://cdn.jsdelivr.net/npm/vega-lite@5.2.0"></script>
+    		<script src="https://cdn.jsdelivr.net/npm/vega-embed@6.20.2"></script>
+		
+		<style media="screen">
+      			/* Add space between Vega-Embed links  */
+      			.vega-actions a {
+        			margin-right: 5px;
+      			}
+			section {
+				  display: flex;
+				    flex-flow: column;
+				      height: 100vh;
+			}
+			/* "nice" table */
+			#table_container td {
+				white-space: pre;
+				max-width: 400px;
+				overflow: hidden;
+				text-overflow: ellipsis;
+			}
+			#table_container tr > td:hover {
+				    overflow: visible;
+				    white-space: unset;
+			}
+			#table_container table {
+				  border-collapse: collapse;
+				  counter-reset: rowNumber -1;
+			}
+			#table_container table tr:not(:first-child)::before {
+				  display: table-cell;
+				  counter-increment: rowNumber;
+				  content: counter(rowNumber);
+				  padding-right: 0.3em;
+				  text-align: right;
+				  background: #CFCFCF;
+				  position: sticky;
+				  left: 0;
+				  z-index:1
+			}
+			#table_container table tr:first-child::before {
+				  display: table-cell;
+				  counter-increment: rowNumber;
+				  content: "";
+				  padding-right: 0.3em;
+				  text-align: right;
+				  background: #CFCFCF;
+				  position: sticky;
+				  top: 0;
+				  z-index:2
+			}
+
+			#table_container table tr:nth-child(odd) td{
+				    background: #DFECE5;
+			}
+			label {
+				    vertical-align: top;
+			}
+			#table_container th {
+				  text-align: left;
+				  position: sticky;
+				  top: 0;
+				  background: #B3D5C3;
+				  z-index: 2;
+			}
+
+			/* FLEX layout */
+			.header, .menuDatasetsCharts, .specs, .controls, .results {
+				display: flex;
+			}
+			.header {
+				background: #CADED3;
+				align-items: center;
+			}
+			.menuDatasetsCharts {
+				align-items: center;
+			}
+			.logo {
+			}
+			.username, .execbtn {
+				margin-left: auto;
+			}
+			.password {
+			}
+			.loginbtn {
+			}
+			.datasetMenu, .chartMenu {
+				flex: 1;
+			}
+			.vlSpecArea, .sqlArea {
+				flex: 1;
+			}
+			.menuDatasetsChartsSpacer, .resultsSpacer {
+				flex: 0 0 200px;
+			}
+
+			/* database colapsible tree */
+			.dbtree {
+				flex: 0 0 200px;
+				border: 1px solid gray;
+				margin: 0px;
+				padding: 0px;
+				min-width: 200px;
+				max-width: 200px;
+				min-height: 348px;
+				max-height: 348px;
+				overflow-x: scroll;
+				overflow-y: scroll;
+			}
+				ul, #dbTreeRoot {
+				  list-style-type: none;
+			}
+			#dbTreeRoot {
+				  margin: 0;
+				  padding: 0;
+			}
+			.caret {
+				  cursor: pointer;
+				  user-select: none; /* Prevent text selection */
+			}
+			.caret::before {
+				content: "\25B8";
+			    	color: black;
+				display: inline-block;
+				margin-right: 1px;
+			}
+			.caret-down::before {
+				  transform: rotate(90deg);
+			}
+			.nested {
+				  display: none;
+				  padding-left: 15px;
+			}
+			.active {
+				  display: block;
+			}
+			li {
+				white-space: nowrap;
+			}
+			.dbTreeColumn {
+				cursor: copy;
+			}
+			
+			/* result containers */
+			#table_container {
+				flex: 3;
+				height: 100%;
+				border-right: 1px solid #DFECE5 
+			}
+			#chart_container {
+				flex: 2;
+				height: 100%;
+			}
+			.chart_container_hide {
+				display: none;
+			}
+
+			textarea {
+				  width: 100%;
+				  height: 350px;
+				  overflow-y: scroll;
+				  overflow-x: scroll;
+				  resize: none;
+			}
+			
+			.results {
+				flex 1 0 auto;
+				background: #F1FAF5;
+			  	overflow: auto;
+				height: 100%
+			}
+    		</style>
+	</head>
+
+	<body>
+		<script>
+			var clickhouseURL = 'https://clickhouse.janantos.com/';
+			var session_id = crypto.randomUUID();
+			var loginCredentials =  {};
+
+			var _table_ = document.createElement('table'),
+  				_tr_ = document.createElement('tr'),
+  				_th_ = document.createElement('th'),
+  				_td_ = document.createElement('td'),
+				_div_ = document.createElement('div');
+
+			function buildHtmlTable(arr) {
+  				var table = document.createElement("table").cloneNode(false),
+    				columns = addAllColumnHeaders(arr, table);
+  				for (var i = 0, maxi = arr.length; i < maxi; ++i) {
+    					var tr = _tr_.cloneNode(false);
+    					for (var j = 0, maxj = columns.length; j < maxj; ++j) {
+      						var td = _td_.cloneNode(false);
+      						var cellValue = arr[i][columns[j]];
+						td.style.border = "1px solid #000";
+      						td.appendChild(document.createTextNode(arr[i][columns[j]] || ''));
+						tr.style.border = "1px solid #000";
+      						tr.appendChild(td);
+    					}	
+    					table.appendChild(tr);
+  				}
+				table.style.border = "1px solid #000";
+  				return table;
+			}
+
+			function addAllColumnHeaders(arr, table) {
+  				var columnSet = [],
+    				tr = _tr_.cloneNode(false);
+  				for (var i = 0, l = arr.length; i < l; i++) {
+    					for (var key in arr[i]) {
+      						if (arr[i].hasOwnProperty(key) && columnSet.indexOf(key) === -1) {
+        						columnSet.push(key);
+        						var th = _th_.cloneNode(false);
+							th.style.border = "1px solid #000"
+        						th.appendChild(document.createTextNode(key));
+							tr.style.border = "1px solid #000"
+        						tr.appendChild(th);
+      						}
+    					}
+  				}
+  				table.appendChild(tr);
+  				return columnSet;
+			}
+
+			function isJsonString(str) {
+    				try {
+        				JSON.parse(str);
+    				} catch (e) {
+					console.log(e)
+        				return false;
+    				}
+    				return true;
+			}
+
+			async function renderViz(domContainer, vlSpecText, data){
+				if (isJsonString(vlSpecText)) {
+					var vlSpec = JSON.parse(vlSpecText);
+					vlSpec.data.values = data;
+					vegaEmbed("#"+domContainer, vlSpec, {"actions":false}).then(function(result) {}).catch(console.error);;
+				} else {
+					document.getElementById(domContainer).innerHTML='vlSpec is not valid JSON';
+				}
+			}
+
+			 async function chQuery(url, username, passwd, sql) {
+				var headers = new Headers();
+				headers.append('Accept', 'application/json');
+				headers.append('Content-Type', 'application/json');
+				headers.append('X-ClickHouse-User', username);
+				headers.append('X-ClickHouse-Key', passwd);
+				headers.append('X-ClickHouse-Format', 'JSON');
+				const response = await  fetch(url, {
+					method: 'POST',
+					mode: 'cors',
+					headers:  headers ,
+					body: sql,
+				});
+				const responseStatus = response.status;
+				return 	response
+					.text()
+					.then( responseText => {
+						try{
+							
+							const data = JSON.parse(responseText);
+							// renderViz('#chart_container',vlSpecText,data.data);
+							const status="OK";
+							const errormsg = "";
+							return {"status":status, "msg":errormsg, "data":data, "response":responseStatus};
+							
+						}
+						catch(err){
+							const status = "OK";
+							const errormsg = responseText;
+							const data = {};
+							return {"status":status, "msg":errormsg, "data":data, "response":responseStatus};
+						}
+					} 
+					)
+					.catch(error => {
+						const status = "ERROR";
+						const errormsg = error;
+						const data = {}
+						return {"status":status, "msg":errormsg, "data":data, "response":responseStatus};
+					});
+			};
+      
+      // Since window.getSelection does not work in FF we are usining this dirty hack
+      var selectedTextArea;
+
+      function getTextareaSelection(){
+        var field = window.selectedTextArea;
+        var startPos = field.selectionStart;
+        var endPos = field.selectionEnd;
+        var selectedText = field.value.substring(startPos, endPos);
+        return selectedText;
+      }
+
+			async function showResults(){
+				
+				// this does not work in FF, but does in Safari, Chrome
+        //var selection = window.getSelection().toString();
+        var selection = getTextareaSelection();
+
+				var username = document.getElementById('user').value;
+				var passwd = document.getElementById('passwd').value;
+        var sql = (selection.length > 0) ? selection :  document.getElementById('sql').value;
+      
+				var vlSpec = document.getElementById('vlSpec').value;
+				var chart_container = document.getElementById('chart_container');
+				var execbtn = document.getElementById('execbtn');
+				execbtn.disabled = true;
+				const result = await chQuery(clickhouseURL+"?session_id="+session_id, username, passwd, sql);
+				console.log(result);	
+				document.getElementById('table_container').innerHTML="";
+				if (result.response == 200 && (Object.keys(result.data)).length > 0){
+					document.getElementById('table_container').append(buildHtmlTable(result.data.data));
+				} else if (result.response == 200) {
+						document.getElementById('table_container').innerHTML="<div style='color: green'>OK</div><br><pre style='white-space: pre-line;'>"+result.msg+"</pre>"
+				} else {
+					document.getElementById('table_container').innerHTML="<div style='color: red'>"+result.msg+"</div>"
+				}
+				if (document.getElementById('dochart').checked) {
+					renderViz('chart_container', vlSpec, result.data.data);
+				}
+				execbtn.disabled = false;
+			};
+		
+			async function refreshDatasets(){
+				var username = document.getElementById('user').value;
+				var passwd = document.getElementById('passwd').value;
+				let result = await chQuery(clickhouseURL, username, passwd, "select id, name from chloe.datasets");
+				if (result.status == "OK" && (Object.keys(result.data)).length > 0){
+					select = document.getElementById('datasets');
+					while (select.options.length > 0) {
+						select.remove(0);
+					};
+					select.options.add(new Option('',''));
+					result.data.data.forEach(option => { 
+						select.options.add(
+							new Option(option.name, option.id)
+						);
+					});
+				} else if (result.status == "OK" && (Object.keys(result.data)).length == 0) {
+					document.getElementById('table_container').innerHTML="<div style='color: green'>OK</div>";								
+				} else {
+					document.getElementById('table_container').innerHTML="<div style='color: red'>"+result.msg+"</div>"
+				}
+			}
+			
+			async function refreshCharts(){
+				var username = document.getElementById('user').value;
+				var passwd = document.getElementById('passwd').value;
+				let result = await chQuery(clickhouseURL, username, passwd, "select id, name from chloe.charts");
+				if (result.status == "OK" && (Object.keys(result.data)).length > 0){
+					select = document.getElementById('charts');
+					while (select.options.length > 0) {
+						select.remove(0);
+					};
+					select.options.add(new Option('',''));
+					result.data.data.forEach(option => { 
+						select.options.add(
+							new Option(option.name, option.id)
+						);
+					});
+				} else if (result.status == "OK" && (Object.keys(result.data)).length == 0) {
+					document.getElementById('table_container').innerHTML="<div style='color: green'>OK</div>";								
+				} else {
+					document.getElementById('table_container').innerHTML="<div style='color: red'>"+result.msg+"</div>"
+				}
+			}
+
+			async function loadDataset(id){
+				var username = document.getElementById('user').value;
+				var passwd = document.getElementById('passwd').value;
+				let result = await chQuery(clickhouseURL, username, passwd, "select sql from chloe.datasets where id='"+id+"'");
+				document.getElementById('chart_container').innerHTML="";
+				document.getElementById('table_container').innerHTML="";
+				if (result.status == "OK" && (Object.keys(result.data)).length > 0){
+					document.getElementById('sql').value = result.data.data[0].sql;	
+				} else if (result.status == "OK" && (Object.keys(result.data)).length == 0) {
+					document.getElementById('table_container').innerHTML="<div style='color: green'>OK</div>";								
+				} else {
+					document.getElementById('table_container').innerHTML="<div style='color: red'>"+result.msg+"</div>"
+				}
+
+			}
+
+			async function loadChart(id){
+				var username = document.getElementById('user').value;
+				var passwd = document.getElementById('passwd').value;
+				let result = await chQuery(clickhouseURL, username, passwd, "select chartSpec from chloe.charts where id='"+id+"'");
+				document.getElementById('chart_container').innerHTML="";
+				document.getElementById('table_container').innerHTML="";
+				if (result.status == "OK" && (Object.keys(result.data)).length > 0){
+					document.getElementById('vlSpec').value = result.data.data[0].chartSpec;	
+				} else if (result.status == "OK" && (Object.keys(result.data)).length == 0) {
+					document.getElementById('table_container').innerHTML="<div style='color: green'>OK</div>";								
+				} else {
+					document.getElementById('table_container').innerHTML="<div style='color: red'>"+result.msg+"</div>"
+				}
+
+			}
+
+
+			async function login(){
+				var username = document.getElementById('user').value;
+				var passwd = document.getElementById('passwd').value;
+				let result = await chQuery(clickhouseURL, username, passwd, "select 1 as check");
+				if (result.response == 200 && (Object.keys(result.data)).length > 0){
+					document.getElementById("user").readOnly=true;
+					document.getElementById("passwd").readOnly=true;
+					document.getElementById("loginbutton").disabled=true;
+					
+					//refreshDatasets();
+					//refreshCharts();
+					
+					loadDBTree();
+				} else {
+					document.getElementById('table_container').innerHTML="<div style='color: red'>"+result.msg+"</div>"
+				}
+
+			}
+			
+			async function loadDBTree() {
+				var username = document.getElementById('user').value;
+				var passwd = document.getElementById('passwd').value;
+				var sql = "select database, table, name, substring(if(database !='' and table !='' and name !='',type, ''),1,20) as type from (select database, table, name, any(type) as type from system.columns where database not ilike 'INFORMATION_SCHEMA' group by database, table, name with rollup order by database, table, name) columns where database !='' or table !='' or name !='' union distinct select name, '', '', '' from system.databases where name not ilike 'INFORMATION_SCHEMA'";
+				var dbTreeElement = document.getElementById('dbTreeRoot');
+				let result = await chQuery(clickhouseURL, username, passwd, sql);
+				result.data.data.forEach(row => {
+					if (row.table == ""  && row.name == "") {
+						var id = `db-${row.database}-${row.table}-${row.name}`;
+						var ul = document.getElementById("dbTreeRoot");
+						var li = document.createElement("li");
+						var ulnested = document.createElement("ul");
+						ulnested.setAttribute("id", id);
+						ulnested.setAttribute("class", "nested");
+						var span =  document.createElement("span");
+						span.setAttribute("class", "caret");
+						span.appendChild(document.createTextNode(`${row.database}`));
+						li.appendChild(span);
+						li.appendChild(ulnested);
+						ul.appendChild(li);
+					} else if (row.table !== "" && row.name == "") {
+						var parentid = `db-${row.database}--`;
+						var id = `db-${row.database}-${row.table}-${row.name}`;
+						var li = document.createElement("li");
+						var ulnested = document.createElement("ul");
+						ulnested.setAttribute("id", id);
+						ulnested.setAttribute("class", "nested");
+						var span =  document.createElement("span");
+						span.setAttribute("class", "caret");
+						span.appendChild(document.createTextNode(`${row.table}`));
+						li.appendChild(span);
+						li.appendChild(ulnested);
+						document.getElementById(parentid).appendChild(li);
+					} else if (row.name !== "") {
+						var parentid = `db-${row.database}-${row.table}-`;
+						var id = `db-${row.database}-${row.table}-${row.name}`;
+						var li = document.createElement("li");
+						li.setAttribute("class","dbTreeColumn");
+						li.setAttribute("onclick",`navigator.clipboard.writeText("${row.name}")`);
+						li.appendChild(document.createTextNode(`${row.name} (${row.type})`));
+						document.getElementById(parentid).appendChild(li);
+					}
+					
+				});
+				var toggler = document.getElementsByClassName("caret");
+					var i;
+					for (i = 0; i < toggler.length; i++) {
+						toggler[i].addEventListener("click", function() {
+							this.parentElement.querySelector(".nested").classList.toggle("active");
+							this.classList.toggle("caret-down");
+						});
+					}
+			}
+
+			function toggleChart() {
+				if(!document.getElementById("dochart").checked) {
+					if (document.contains(document.getElementById("chart_container"))) {
+					            document.getElementById("chart_container").remove();
+					}
+
+				} else {
+					var container = document.createElement("div");
+					container.setAttribute("id","chart_container");
+					document.querySelector(".results").appendChild(container);
+				}
+			}
+
+			document.addEventListener('keydown',(evt) => {
+				if (evt.keyCode === 13 && evt.altKey) {
+					evt.preventDefault();
+					showResults();
+				}
+			});
+			
+
+		</script>
+		<section>
+		<div class="header">
+			<div class="logo">&#x1F9D9;ClickHouse Wizard Tower</div>
+			<div class="username"><input type='text' id='user' placeholder='username'></div>
+			<div class="password"><input type='password' id='passwd' placeholder='password'></div>
+			<div class="loginbtn" ><button type='button'id='loginbutton'  onclick='login()'>login</button></div>
+		</div>
+		<br>
+		<div class="menuDatasetsCharts">
+			<div class="menuDatasetsChartsSpacer"></div>
+			<div class="datasetMenu">
+				<!--
+				<label for="datasets">Datasets</label>
+				<select id="datasets" onchange='if(this.value !==""){loadDataset(this.value)}else{document.getElementById("sql").value=""}'>
+					<option value=''></option>
+				</select>
+				<span onclick="refreshDatasets()" style="cursor: pointer;">&#x1F503;</span>
+				-->
+			</div>
+			<div class="chartMenu">
+				<!--
+				<label for="charts">Charts</label>
+				<select id="charts" onchange='if(this.value !==""){loadChart(this.value)}else{document.getElementById("sql").value=""}'>
+					<option value=''></option>
+				</select>
+				<span onclick="refreshCharts()" style="cursor: pointer;">&#x1F503;</span>
+				
+				<label for="chart_templates">Chart Templates</label>
+				<select id="chart_templates" onchange='if(this.value !==""){}'>
+					<option value=''></option>
+				</select>
+        -->
+			</div>
+		</div>
+
+		<br>
+		<div class="specs">
+			<div class="dbTree">
+				<ul id="dbTreeRoot">
+				</ul>
+			</div> 
+			<div class="sqlArea">
+				<textarea id='sql' onselect='window.selectedTextArea = this'></textarea>
+			</div>
+			<div class="vlSpecArea">
+				<textarea id='vlSpec' onselect='window.selectedTextArea = this'></textarea>
+			</div>
+		</div>
+		<br>
+		<div class="controls">
+			<div class="chartchck">
+			<input type="checkbox" id="dochart" name="chart" value="chart" onchange='toggleChart()' >
+			<label for="dochart">Generate Chart</label>
+			</div>
+			<div class="execbtn"><button  type='button' id='execbtn' onclick='showResults();'>Execute (Alt+Enter)</button></div>
+		</div>
+		<br>
+		<div class="results">
+			<div id='table_container' style="overflow-x: auto; overflow-y: auto"></div>
+		</div>
+		<br>
+		</section>
+	</body>
+</html>
