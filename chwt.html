@@ -177,7 +177,7 @@
 
 	<body>
 		<script>
-			var clickhouseURL = 'https://clickhouse.janantos.com/';
+			var clickhouseURL = (new URL(window.location)).host;
 			var session_id = crypto.randomUUID();
 			var loginCredentials =  {};
 
